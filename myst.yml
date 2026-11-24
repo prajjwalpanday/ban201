@@ -1,0 +1,21 @@
+# See docs at: https://mystmd.org/guide/frontmatter
+version: 1
+project:
+  title: BAN 201
+  description: "Introduction to Business Analytics. Lecture notes for first-year undergraduates at Nichols College, Fall 2026."
+  keywords:
+    - BAN 201
+    - business analytics
+    - descriptive analytics
+    - Nichols College
+  toc:
+    - file: content/index.md
+    - file: content/week-01-introduction.md
+    - file: content/week-02-descriptive-analytics.md
+    - file: content/week-03-wrap-up.md
+    - file: content/week-04-presenting-findings.md
+    - title: Assignments
+      children:
+        - file: content/assignments/in-class-descriptive-analytics.md
+site:
+  template: book-theme
