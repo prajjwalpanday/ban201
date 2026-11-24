@@ -31,9 +31,56 @@ jobs:
       - name: Build HTML Assets
         run: jupyter-book build --html
       - name: Upload artifact
+        id: upload
         uses: actions/upload-pages-artifact@v3
         with:
           path: "./_build/html"
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        env:
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ARTIFACT_ID}" ]; then
+            echo "The upload step did not return an artifact id."
+            exit 1
+          fi
+          echo "Publishing artifact ${ARTIFACT_ID}"
+          OIDC_TOKEN=$(curl -fsSL \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}" | jq -r '.value')
+          if [ -z "${OIDC_TOKEN}" ] || [ "${OIDC_TOKEN}" = "null" ]; then
+            echo "Could not get a token to publish the site."
+            exit 1
+          fi
+          RESPONSE=$(curl -fsSL -X POST \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pages/deployments" \
+            -d "{\"artifact_id\": ${ARTIFACT_ID}, \"oidc_token\": \"${OIDC_TOKEN}\", \"pages_build_version\": \"${GITHUB_SHA}\"}")
+          echo "${RESPONSE}" | jq .
+          PAGE_URL=$(echo "${RESPONSE}" | jq -r '.page_url // empty')
+          echo "page_url=${PAGE_URL}" >> "${GITHUB_OUTPUT}"
+          DEPLOYMENT_ID=$(echo "${RESPONSE}" | jq -r '.id // empty')
+          if [ -z "${DEPLOYMENT_ID}" ]; then
+            DEPLOYMENT_ID="${GITHUB_SHA}"
+          fi
+          for i in $(seq 1 30); do
+            STATUS=$(curl -fsSL \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/pages/deployments/${DEPLOYMENT_ID}" | jq -r '.status')
+            echo "Status: ${STATUS}"
+            case "${STATUS}" in
+              succeed) exit 0 ;;
+              deployment_failed|deployment_content_failed|deployment_cancelled)
+                echo "Pages rejected the site: ${STATUS}"
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+          echo "The site did not finish publishing. Last status: ${STATUS}"
+          exit 1
