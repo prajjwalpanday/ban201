@@ -14,10 +14,7 @@ concurrency:
   group: "pages"
   cancel-in-progress: false
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -31,64 +28,16 @@ jobs:
       - name: Build HTML Assets
         run: jupyter-book build --html
       - name: Upload artifact
-        id: upload
         uses: actions/upload-pages-artifact@v5
         with:
           path: "./_build/html"
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/github-script@v8
-        env:
-          UPLOADED_ARTIFACT_ID: ${{ steps.upload.outputs.artifact_id }}
-        with:
-          script: |
-            const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/")
-            let artifactId = process.env.UPLOADED_ARTIFACT_ID
-            if (!artifactId) {
-              const listed = await github.request(
-                "GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts",
-                { owner, repo, run_id: process.env.GITHUB_RUN_ID }
-              )
-              const match = listed.data.artifacts.find(
-                (artifact) => artifact.name === "github-pages" && !artifact.expired
-              )
-              if (!match) {
-                core.setFailed("The built site was not uploaded, so there is nothing to publish.")
-                return
-              }
-              artifactId = String(match.id)
-            }
-            core.info(`Publishing artifact ${artifactId}`)
-            const idToken = await core.getIDToken()
-            const created = await github.request(
-              "POST /repos/{owner}/{repo}/pages/deployments",
-              {
-                owner,
-                repo,
-                artifact_id: Number(artifactId),
-                oidc_token: idToken,
-                pages_build_version: process.env.GITHUB_SHA
-              }
-            )
-            core.info(`Page URL: ${created.data.page_url}`)
-            core.setOutput("page_url", created.data.page_url)
-            const deploymentId = created.data.id
-            for (let attempt = 1; attempt <= 30; attempt++) {
-              const statusResponse = await github.request(
-                "GET /repos/{owner}/{repo}/pages/deployments/{pages_deployment_id}",
-                { owner, repo, pages_deployment_id: deploymentId }
-              )
-              const status = statusResponse.data.status
-              core.info(`Status: ${status}`)
-              if (status === "succeed") return
-              if (
-                status === "deployment_failed" ||
-                status === "deployment_content_failed" ||
-                status === "deployment_cancelled"
-              ) {
-                core.setFailed(`Pages rejected the site (${status}).`)
-                return
-              }
-              await new Promise((resolve) => setTimeout(resolve, 5000))
-            }
-            core.setFailed("The site did not finish publishing in time.")
+        uses: actions/deploy-pages@v5
